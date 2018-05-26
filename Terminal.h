@@ -1,17 +1,45 @@
 #ifndef TERMINAL_H
 #define TERMINAL_H
 
+#include <unistd.h>
+
 #include "Parser.h"
 
-const std::string currentDateTime()
+using std::string;
+
+const string currentDateTime()
 {
     time_t     now = time(0);
     struct tm  tstruct;
-    char       buf[80];
+    char       buf[10];
     tstruct = *localtime(&now);
-    strftime(buf, sizeof(buf), "%Y-%m-%d.%X", &tstruct);
+    strftime(buf, 10, "%X", &tstruct);
 
-    return buf;
+    return string(buf);
+}
+
+const string getUserName() {
+    return string(getlogin());
+}
+
+const string getHostName() {
+    char hostname[64];
+    if(gethostname(hostname, 63) != -1) {
+        hostname[63] = 0;
+        return string(hostname);
+    }
+
+    return "unknown";
+}
+
+const string getCurrentDir() {
+    char path[300];
+    if(getcwd(path, 299) != NULL) {
+        path[299] = 0;
+        return string(path);
+    }
+
+    return "error"; // xD
 }
 
 class Terminal
@@ -22,19 +50,18 @@ public :
         static Terminal instance;
         return instance;
     }
-    void start(std::string _user, std::string _dir)
+    void start()
     {
-        user = _user;
-        dir = _dir;
         while(true)
         {
-            try{
-                std::cout << "[" << currentDateTime() << "]" << user <<"@ubuntu" << dir <<">" ;
-                std::getline(std::cin,input);
+            try {
+                std::cout << "[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName() << " " << getCurrentDir() <<">" ;
+                std::getline(std::cin, input);
                 Parser parser;
                 parser.parse(input);
-            }catch(std::exception &e){
+            } catch(std::exception &e) {
                 std::cout << "Nie rozpoznano polecenia." << std::endl;
+                break; //remove
             }
         }
     }
@@ -44,9 +71,7 @@ private:
     Terminal& operator=(Terminal const&) {};
     static Terminal *instance;
 
-    std::string user;
-    std::string dir;
-    std::string input;
+    string input;
 
 };
 #endif // TERMINAL_H
