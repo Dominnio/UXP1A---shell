@@ -93,7 +93,8 @@ public :
             {
                 auto remember = j;
                 auto todelete = i;
-                if((++j) == (*i)->getStr().end())
+                ++j;
+                if((j) == (*i)->getStr().end() || *j == '\0')
                 {
                     if(++i != args.end())
                     {
@@ -136,6 +137,10 @@ public :
             (*i)->dequota();
         }
         auto i = args.begin();
+        if(*i == NULL)
+        {
+            throw SemanticException();
+        }
         order = new OrderArg((*i)->getStr());
         i++;
         while(i != args.end())
