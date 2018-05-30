@@ -1,3 +1,10 @@
+//
+// Created by dominik on 31.05.18.
+//
+
+#ifndef UNTITLED_PARSER_H
+#define UNTITLED_PARSER_H
+
 #ifndef PARSER_H
 #define PARSER_H
 
@@ -11,7 +18,7 @@ const int MAXLINESIZE = 500;
 class Parser
 {
 
-friend class ExportStatement;
+    friend class ExportStatement;
 
 public :
     char nextChar()
@@ -197,3 +204,6 @@ private:
 
 
 #endif // PARSER_H
+
+
+#endif //UNTITLED_PARSER_H

@@ -1,3 +1,10 @@
+//
+// Created by dominik on 31.05.18.
+//
+
+#ifndef UNTITLED_ARG_H
+#define UNTITLED_ARG_H
+
 /*
  *  Created by Dominik on 26.05.2018.
  */
@@ -62,7 +69,13 @@ public:
                     str.erase(b,e);
                     auto j = str.begin();
                     while(*j != '$') j++;
-                    str.replace(j,j++,"podstawiona_wartosc");
+                    auto name = getenv(envname.c_str());
+                    if(name == nullptr)
+                    {
+                        std::cout << "Uzyto nieistniejacej zmiennej srodowiskowej\n";
+                        throw SemanticException();
+                    }
+                    str.replace(j,j++,name);
                     j = str.begin();
                     while(*j != '$') j++;
                     str.erase(j);
@@ -139,3 +152,5 @@ public:
     };
 };
 #endif //UXP1A_ARG_H
+
+#endif //UNTITLED_ARG_H

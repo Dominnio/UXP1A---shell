@@ -1,8 +1,17 @@
+//
+// Created by dominik on 31.05.18.
+//
+
+#ifndef UNTITLED_TERMINAL_H
+#define UNTITLED_TERMINAL_H
+
 #ifndef TERMINAL_H
 #define TERMINAL_H
 
-
+#include "unistd.h"
 #include "Parser.h"
+
+const int MAXUSERNAME = 100;
 
 class Terminal
 {
@@ -23,11 +32,13 @@ public :
     }
     void setUser()
     {
-        user = "dominik";
+        char buf[MAXUSERNAME];
+        cuserid(buf);
+        user = std::string(buf);// getlogin();
     }
     void setDir()
     {
-        dir = "/home";
+        dir = getenv("HOME");
     }
     void start()
     {
@@ -37,7 +48,7 @@ public :
             try {
                 setUser();
                 setDir();
-                std::cout << "\n[" << currentDateTime() << "]" << user <<"@ubuntu" << dir <<">" ;
+                std::cout << "\n[" << currentDateTime() << "]" << user <<"@"<< dir <<">" ;
                 std::getline(std::cin,input);
                 parser.parse(input);
                 parser.execute();
@@ -66,3 +77,5 @@ private:
 
 };
 #endif // TERMINAL_H
+
+#endif //UNTITLED_TERMINAL_H
