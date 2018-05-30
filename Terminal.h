@@ -1,50 +1,9 @@
 #ifndef TERMINAL_H
 #define TERMINAL_H
 
-/*
- *  Created by Dominik on 26.05.2018.
- *
- * ================= OPIS =================
- *
- * Ta klasa nie robi nic ciekawego. Po prostu uruchamia terminal i w kółko (do zamknięcia) wczytuje polecenia.
- *
- * Potem polecenie jest parsowane i wykonywane.
- *
- * Parsowanie i wykonanie polecenia może rzucić wyjątek, który jest tutaj łapany.
- *
- * W planach mam jeszcze dopisanie wątku, który będzie obsługiwał klawiaturę (np. strzałki w górę i w dół, ctrl+C).
- *
- */
-
-#include <unistd.h>
 
 #include "Parser.h"
 
-using std::string;
-
-const string getUserName() {
-    return string(getlogin());
-}
-
-const string getHostName() {
-    char hostname[64];
-    if(gethostname(hostname, 63) != -1) {
-        hostname[63] = 0;
-        return string(hostname);
-    }
-
-    return "unknown";
-}
-
-const string getCurrentDir() {
-    char path[300];
-    if(getcwd(path, 299) != NULL) {
-        path[299] = 0;
-        return string(path);
-    }
-
-    return "error"; // xD
-}
 class Terminal
 {
 public :
@@ -53,15 +12,22 @@ public :
         static Terminal instance;
         return instance;
     }
-    const string currentDateTime()
+    const std::string currentDateTime()
     {
-        time_t     now = time(0);
-        struct tm  tstruct;
-        char       buf[10];
+        time_t now = time(nullptr);
+        struct tm tstruct;
+        char buf[80];
         tstruct = *localtime(&now);
-        strftime(buf, 10, "%X", &tstruct);
-
-        return string(buf);
+        strftime(buf, sizeof(buf), "%Y-%m-%d.%X", &tstruct);
+        return buf;
+    }
+    void setUser()
+    {
+        user = "dominik";
+    }
+    void setDir()
+    {
+        dir = "/home";
     }
     void start()
     {
@@ -69,7 +35,9 @@ public :
         while(true)
         {
             try {
-                std::cout << "[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName() << " " << getCurrentDir() <<">" ;
+                setUser();
+                setDir();
+                std::cout << "\n[" << currentDateTime() << "]" << user <<"@ubuntu" << dir <<">" ;
                 std::getline(std::cin,input);
                 parser.parse(input);
                 parser.execute();
@@ -92,6 +60,8 @@ private:
     Terminal& operator=(Terminal const&) {};
     static Terminal* instance;
 
+    std::string user;
+    std::string dir;
     std::string input;
 
 };
