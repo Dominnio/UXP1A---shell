@@ -1,18 +1,8 @@
-//
-// Created by dominik on 31.05.18.
-//
-
-#ifndef UNTITLED_ARG_H
-#define UNTITLED_ARG_H
-
-/*
- *  Created by Dominik on 26.05.2018.
- */
-
 #ifndef UXP1A_ARG_H
 #define UXP1A_ARG_H
 
 #include <algorithm>
+#include "Executor.h"
 
 class Arg
 {
@@ -26,6 +16,7 @@ public:
         return str;
     }
     virtual void print() {};
+    virtual Redirection toRedirection() {};
     void dequota()
     {
         std::string newstr;
@@ -136,6 +127,10 @@ public:
     {
         std::cout << "Przekierowanie wejścia : numer " << num << " do pliku " << str << std::endl;
     };
+
+    Redirection toRedirection() {
+        return Redirection(str, num, REDIR_IN);
+    }
 };
 
 class OutRedirectArg : public RedirectArg
@@ -150,7 +145,9 @@ public:
     {
         std::cout << "Przekierowanie wyjścia : numer " << num << " do pliku " << str << std::endl;
     };
+
+    Redirection toRedirection() {
+        return Redirection(str, num, REDIR_OUT);
+    }
 };
 #endif //UXP1A_ARG_H
-
-#endif //UNTITLED_ARG_H

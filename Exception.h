@@ -1,10 +1,3 @@
-//
-// Created by dominik on 31.05.18.
-//
-
-#ifndef UNTITLED_EXCEPTION_H
-#define UNTITLED_EXCEPTION_H
-
 #ifndef EXCEPTION_H
 #define EXCEPTION_H
 
@@ -65,7 +58,4 @@ public:
     }
 };
 
-
 #endif //EXCEPTION_H
-
-#endif //UNTITLED_EXCEPTION_H

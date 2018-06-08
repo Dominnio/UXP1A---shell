@@ -1,17 +1,11 @@
-//
-// Created by dominik on 31.05.18.
-//
-
-#ifndef UNTITLED_TERMINAL_H
-#define UNTITLED_TERMINAL_H
-
 #ifndef TERMINAL_H
 #define TERMINAL_H
 
-#include "unistd.h"
+#include <unistd.h>
 #include "Parser.h"
+#include "Executor.h"
 
-const int MAXUSERNAME = 100;
+using std::string;
 
 class Terminal
 {
@@ -21,37 +15,19 @@ public :
         static Terminal instance;
         return instance;
     }
-    const std::string currentDateTime()
-    {
-        time_t now = time(nullptr);
-        struct tm tstruct;
-        char buf[80];
-        tstruct = *localtime(&now);
-        strftime(buf, sizeof(buf), "%Y-%m-%d.%X", &tstruct);
-        return buf;
-    }
-    void setUser()
-    {
-        char buf[MAXUSERNAME];
-        cuserid(buf);
-        user = std::string(buf);// getlogin();
-    }
-    void setDir()
-    {
-        dir = getenv("HOME");
-    }
     void start()
     {
         Parser parser;
         while(true)
         {
             try {
-                setUser();
-                setDir();
-                std::cout << "\n[" << currentDateTime() << "]" << user <<"@"<< dir <<">" ;
+                std::cout << "[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName() << " " << getCurrentDir() <<"> ";
                 std::getline(std::cin,input);
                 parser.parse(input);
-                parser.execute();
+                Executor executor;
+                for(auto& cmd: parser.getCommandList()) {
+                    executor.execute(cmd);
+                }
                 input.clear();
             }
             catch(ExitException &e)
@@ -71,11 +47,41 @@ private:
     Terminal& operator=(Terminal const&) {};
     static Terminal* instance;
 
-    std::string user;
-    std::string dir;
     std::string input;
 
+    const string currentDateTime()
+    {
+        time_t     now = time(0);
+        struct tm  tstruct;
+        char       buf[10];
+        tstruct = *localtime(&now);
+        strftime(buf, 10, "%X", &tstruct);
+
+        return string(buf);
+    }
+
+    const string getUserName() {
+        return string(getlogin());
+    }
+
+    const string getHostName() {
+        char hostname[64];
+        if(gethostname(hostname, 63) != -1) {
+            hostname[63] = 0;
+            return string(hostname);
+        }
+
+        return "unknown";
+    }
+
+    const string getCurrentDir() {
+        char path[300];
+        if(getcwd(path, 299) != NULL) {
+            path[299] = 0;
+            return string(path);
+        }
+
+        return "error"; // xD
+    }
 };
 #endif // TERMINAL_H
-
-#endif //UNTITLED_TERMINAL_H

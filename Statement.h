@@ -1,30 +1,9 @@
-//
-// Created by dominik on 31.05.18.
-//
-
-#ifndef UNTITLED_STATEMENT_H
-#define UNTITLED_STATEMENT_H
-
 #ifndef STATEMENT_H
 #define STATEMENT_H
 
 #include "Exception.h"
 #include "Arg.h"
-
-enum SymType { cdsy, lssy, exportsy, pwdsy, exitsy, fgsy, bgsy, identsy, EOLsy, STARTsy, othersy };
-
-std::map<std::string,SymType> KeyWordMap
-        {
-                std::make_pair("cd", cdsy),
-                std::make_pair("ls", lssy),
-                std::make_pair("export", exportsy),
-                std::make_pair("pwd", pwdsy),
-                std::make_pair("exit", exitsy),
-                std::make_pair("fg", fgsy),
-                std::make_pair("bg", bgsy)
-        };
-
-std::map<std::string,SymType> KeySignMap {};
+#include "Executor.h"
 
 class Statement
 {
@@ -55,6 +34,23 @@ public:
         }
 
     };
+
+    Command toCommand()
+    {
+        Command cmd;
+        cmd.app = order->getStr();
+        for(auto iter = argList.begin(); iter != argList.end(); iter++)
+        {
+            cmd.params.push_back((*iter)->getStr());
+        }
+        for(auto iter = redirectList.begin(); iter != redirectList.end(); iter++)
+        {
+            cmd.redirections.emplace_back((*iter)->toRedirection());
+        }
+        cmd.foreground = !isBackground;
+        return cmd;
+    };
+
 protected:
     Arg*                order;
     std::list<Arg*>     argList;
@@ -62,8 +58,4 @@ protected:
     bool                isBackground;
 };
 
-
 #endif // STATEMENT_H
-
-
-#endif //UNTITLED_STATEMENT_H

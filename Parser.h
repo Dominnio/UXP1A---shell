@@ -1,13 +1,5 @@
-//
-// Created by dominik on 31.05.18.
-//
-
-#ifndef UNTITLED_PARSER_H
-#define UNTITLED_PARSER_H
-
 #ifndef PARSER_H
 #define PARSER_H
-
 
 #include "Statement.h"
 #include "Arg.h"
@@ -185,13 +177,24 @@ public :
         return new Arg(spellArg);
     }
 
-    void execute()
+    void print()
     {
         for(auto iter = statementList.begin(); iter != statementList.end(); iter++)
         {
             (*iter)->execute();
         }
+//        statementList.clear();
+    }
+
+    vector<Command> getCommandList()
+    {
+        vector<Command> res;
+        for(auto iter = statementList.begin(); iter != statementList.end(); iter++)
+        {
+            res.emplace_back((*iter)->toCommand());
+        }
         statementList.clear();
+        return res;
     }
 
 private:
@@ -204,6 +207,3 @@ private:
 
 
 #endif // PARSER_H
-
-
-#endif //UNTITLED_PARSER_H
