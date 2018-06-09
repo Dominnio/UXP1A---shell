@@ -7,9 +7,6 @@ using std::endl;
 #define F_EXIST 0
 #define F_EXECABLE 1
 
-sig_atomic_t Executor::runningGID = 0;
-sig_atomic_t Executor::stopped = false;
-
 uint8_t checkFile(const char* path) {
     struct stat sb;
     uint8_t res = 0;
@@ -28,31 +25,35 @@ uint8_t checkFile(string& path) {
     return checkFile(path.c_str());
 }
 
-//void Executor::stop_handler(int sig) {
-//    if(sig == SIGSTOP) {
-//        cout << "STOP RECEIVED" << endl;
-//        if (Executor::runningGID != 0) {
-//            killpg(Executor::runningGID, SIGSTOP);
-//            Executor::stopped = true;
-//        }
-//    }
-//}
+void setDefaultSignals() {
+    signal (SIGINT, SIG_DFL);
+    signal (SIGQUIT, SIG_DFL);
+    signal (SIGTSTP, SIG_DFL);
+    signal (SIGTTIN, SIG_DFL);
+    signal (SIGTTOU, SIG_DFL);
+    signal (SIGCHLD, SIG_DFL);
+}
 
 void Executor::handle_child_death(int pid, int status) {
-    for(auto& job: jobs) {
-        if(job.second.processes.erase(pid)) {
-            job.second.dead_cnt++;
-            cout<<"process "<<pid<<" from group "<<job.first<<" finished with code "<<status<<endl;
-            if(pid == job.second.last_pid) {
-                job.second.return_code = status;
+    for(auto it = jobs.begin(); it != jobs.end(); ++it) {
+        auto& job = *it;
+        if(job.processes.erase(pid)) {
+            job.dead_cnt++;
+            cout<<"process "<<pid<<" from group "<<job.group<<" finished with code "<<status<<endl;
+            if(pid == job.last_pid) {
+                job.return_code = status;
                 cout<<"it was the last launched process, saving return code"<<endl;
             }
-            if(job.second.processes.empty()) {
+            if(job.processes.empty()) {
+                getControl();
                 cout<<"all processes from group has finished"<<endl;
+                getControl();
+                cout<<"Got control"<<endl;
                 currentRunningGroup = -1;
+                jobs.erase(it);
                 //TODO clean up
             } else {
-                cout<<job.second.processes.size();
+                cout<<job.processes.size();
                 cout<<" processes from group are still running"<<endl;
             }
             break;
@@ -71,7 +72,7 @@ void Executor::wait_on_fg() {
 void Executor::int_fg() {
     if(currentRunningGroup != -1) {
         cout<<"sending SIGINT to "<<currentRunningGroup<<endl;
-        killpg(-currentRunningGroup, SIGINT);
+        killpg(currentRunningGroup, SIGINT);
     }
 }
 
@@ -82,12 +83,138 @@ void Executor::stop() {
         return;
     } else {
         killpg(currentRunningGroup, SIGSTOP);
-        jobs[currentRunningGroup].running = false;
+        for(auto& job: jobs){
+            if(job.group == currentRunningGroup) {
+                job.running = false;
+            }
+        }
         currentRunningGroup = -1;
+        getControl();
     }
 }
 
-int Executor::execute(Command& cmd, string& cmdStr, int gid) {
+bool Executor::getExecPath(string& cmd, string& res) {
+    //app has path included - we do not perform search
+    if(cmd.find('/') != string::npos) {
+        uint8_t status;
+
+        if((status = checkFile(cmd.c_str())) & (1<<F_EXIST)) {
+            if(status & (1 << F_EXECABLE)) {
+                res = cmd;
+                return true;
+            }
+        }
+    } else {
+        char *path = getenv("PATH");
+        char *item = NULL;
+        bool found = false;
+
+        if (!path)
+            return false;
+
+        path = strdup(path);
+
+        char real_path[4096];
+        for (item = strtok(path, ":"); (!found) && item; item = strtok(NULL, ":"))
+        {
+            sprintf(real_path, "%s/%s", item, cmd.c_str());
+
+            if(checkFile(real_path) & ((1<<F_EXIST) | (1<<F_EXECABLE))) {
+                found = true;
+            }
+        }
+
+        free(path);
+
+        if(found) {
+            res = string(real_path);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Executor::isCmdInternal(string& cmd) {
+    static std::unordered_set<string> internals{"exit", "jobs", "fg", "bg", "cd"};
+    return internals.find(cmd) != internals.end();
+}
+
+void Executor::getControl() {
+    tcsetattr (STDIN_FILENO, TCSADRAIN, &shell_tmodes);
+    if (tcsetpgrp(STDIN_FILENO, getpid())) {
+        perror("tcsetpgrp failed");
+    }
+}
+
+void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid) {
+    string execable;
+    if(getExecPath(cmd.app, execable)) {
+        int pid = fork();
+        if (pid == -1) {
+            cerr << "internal error: cannot fork" << endl;
+        } else if (pid == 0) {
+            setDefaultSignals();
+
+            if (gid == -1) {
+                gid = getpid();
+            }
+
+            setpgid(0, gid);
+
+            if(cmd.foreground) {
+                tcsetpgrp(STDIN_FILENO, getpid());
+            }
+
+            char **cmd_b = new char *[cmd.params.size() + 2];
+            cmd_b[0] = strdup(cmd.app.c_str());
+            int pos = 1;
+            for (auto &param: cmd.params) {
+                cmd_b[pos++] = strdup(param.c_str());
+            }
+            cmd_b[pos] = nullptr;
+            execv(execable.c_str(), cmd_b);
+        } else {
+            if (gid == -1) {
+                gid = pid;
+
+                Job tmp;
+                tmp.command = cmdStr;
+                tmp.group = gid;
+                tmp.processes.insert(pid);
+                tmp.running = true;
+                jobs.emplace_back(tmp);
+            } else {
+                bool found = false;
+                for(auto& job: jobs) {
+                    if(job.group == gid) {
+                        job.processes.insert(pid);
+                        found = true;
+                        break;
+                    }
+                }
+
+                if(!found) {
+                    cerr<<"INTERNAL ERROR: wrong gid provided!"<<endl;
+                    return;
+                }
+            }
+
+            setpgid(pid, gid);
+
+            if(cmd.foreground) {
+                tcsetpgrp(STDIN_FILENO, pid);
+                currentRunningGroup = gid;
+            } else {
+                currentRunningGroup = -1;
+            }
+
+        }
+    } else {
+        cerr<<"Cannot execute: '"<<cmd.app<<"'"<<endl;
+    }
+}
+
+void Executor::executeInternal(Command& cmd) {
     if(cmd.app == "cd") {
         currentRunningGroup = -1;
         if(cmd.params.empty()) {
@@ -112,184 +239,60 @@ int Executor::execute(Command& cmd, string& cmdStr, int gid) {
         int pos = 0;
         currentRunningGroup = -1;
         for(auto& job: jobs) {
-            cout<<"["<<pos<<"]: "<<job.second.command<<" ";
-            cout<<(job.second.running ? "running" : "stopped")<<endl;
+            cout<<"["<<pos<<"]: "<<job.command<<" ";
+            cout<<(job.running ? "running" : "stopped")<<endl;
+            pos++;
         }
-    } else if(cmd.app == "fg"){
-        currentRunningGroup = -1;
-        if(!jobs.empty()) {
-            cout<<"Starting "<<(*jobs.begin()).first<<endl;
-            currentRunningGroup = (*jobs.begin()).first;
-            killpg((*jobs.begin()).first, SIGCONT);
+    } else if(cmd.app == "bg" || cmd.app == "fg"){
+        if(jobs.empty()) {
+            return;
         }
+
+        int job_num = jobs.size() - 1;
+
+        if(!cmd.params.empty()) {
+            try {
+                job_num = std::stoi(cmd.params[0]);
+            } catch (...) {
+                job_num = -1;
+            }
+
+            if(job_num >= jobs.size()) {
+                cerr<<"Provided job number is too high"<<endl;
+                return;
+            }
+            if(job_num < 0) {
+                cerr<<"Provided job number is not a number ("<<cmd.params[0]<<endl;
+                return;
+            }
+        }
+
+        Job& job = jobs[job_num];
+
+        cout<<"Starting "<<job.group<<endl;
+        job.running = true;
+        if(cmd.app == "fg") {
+            currentRunningGroup = job.group;
+            tcsetpgrp(STDIN_FILENO, job.group);
+        }
+        killpg(job.group, SIGCONT);
+
     } else if(cmd.app == "exit"){
         exit(0);
-    } else { //not build-in command
-
-        //app has path included - we do not perform search
-        if(cmd.app.find('/') != string::npos) {
-            uint8_t status;
-
-            if((status = checkFile(cmd.app.c_str())) & (1<<F_EXIST)) {
-                if(status & (1<<F_EXECABLE)) {
-                    cout<<"executing local"<<endl;
-                    int pid = fork();
-                    if(pid == -1) {
-                        cerr<<"internal error (1)"<<endl;
-                    } else if(pid == 0) {
-                        if(gid == -1) {
-                            setpgid(0, 0);
-                        } else {
-                            setpgid(0, gid);
-                        }
-                        char** cmd_b = new char* [cmd.params.size() + 2];
-                        cmd_b[0] = strdup(cmd.app.c_str());
-                        int pos = 1;
-                        for(auto& param: cmd.params) {
-                            cmd_b[pos++] = strdup(param.c_str());
-                        }
-                        cmd_b[pos] = nullptr;
-                        execv(cmd.app.c_str(), cmd_b);
-                    } else {
-                        Job tmp;
-                        tmp.command = cmdStr;
-                        if(gid == -1) {
-                            tmp.group = pid;
-                            gid = pid;
-                        } else {
-                            tmp.group = gid;
-                        }
-                        tmp.dead_cnt = 0;
-                        tmp.processes.insert(pid);
-                        tmp.running = true;
-                        jobs[gid] = tmp;
-                        currentRunningGroup = gid;
-
-                        cout<<"running "<<jobs[gid].processes.size()<<" processes"<<endl;
-
-//                        for(int i=0; i<jobs[gid].processes.size(); i++) {
-//                            cout<<"waiting"<<endl;
-//
-//                            int ret;
-//                            waitpid(-(gid), &ret, 0);
-//                            if(!jobs[gid].running) {
-//                                cout<<"job "<<gid<<" sleeped"<<endl;
-//                                break;
-//                            }
-//                        }
-//                        cout<<"finished waiting for group "<<gid<<endl;
-
-//                        int returnCode;
-//                        stopped = false;
-//                        runningGID = pid;
-//                        if(signal(SIGSTOP, Executor::stop_handler) == 0) {
-//                            cout<<"signal attached"<<endl;
-//                        } else {
-//                            cout<<"signal not attached"<<endl;
-//                        }
-//                        waitpid(pid, &returnCode, 0);
-//                        runningGID = 0;
-//                        if(stopped) {
-//                            cout<<"job "<<cmdStr<<" has been stopped"<<endl;
-//                        } else {
-//                            jobs.erase(jobs.find(pid));
-//                            cout << "job " << cmdStr << " returned with code: " << returnCode << endl;
-//                        }
-                    }
-                } else {
-                    cerr<<cmd.app<<" is not executable"<<endl;
-                }
-            } else {
-                cerr<<cmd.app<<" no such file"<<endl;
-            }
-
-        } else { // we have to search in $PATH
-
-            char *path = getenv("PATH");
-            char *item = NULL;
-            bool found = false;
-
-            if (!path)
-                return 0;
-
-            path = strdup(path);
-
-            char real_path[4096];
-            for (item = strtok(path, ":"); (!found) && item; item = strtok(NULL, ":"))
-            {
-                sprintf(real_path, "%s/%s", item, cmd.app.c_str());
-
-                if(checkFile(real_path) & ((1<<F_EXIST) | (1<<F_EXECABLE))) {
-                    found = true;
-                }
-            }
-
-            free(path);
-
-            if(found) {
-                cout<<"executing global ("<<real_path<<")"<<endl;
-                int pid = fork();
-                if(pid == -1) {
-                    cerr<<"internal error (1)"<<endl;
-                } else if(pid == 0) {
-                    setpgid(0, 0);
-                    char** cmd_b = new char* [cmd.params.size() + 2];
-                    cmd_b[0] = strdup(cmd.app.c_str());
-                    int pos = 1;
-                    for(auto& param: cmd.params) {
-                        cmd_b[pos++] = strdup(param.c_str());
-                    }
-                    cmd_b[pos] = nullptr;
-                    execv(real_path, cmd_b);
-                } else {
-                    Job tmp;
-                    tmp.command = cmdStr;
-                    if(gid == -1) {
-                        tmp.group = pid;
-                        gid = pid;
-                    } else {
-                        tmp.group = gid;
-                    }
-                    tmp.dead_cnt = 0;
-                    tmp.processes.insert(pid);
-                    tmp.running = true;
-                    jobs[gid] = tmp;
-                    currentRunningGroup = gid;
-
-                    cout<<"running "<<jobs[gid].processes.size()<<" processes"<<endl;
-
-//                    for(auto& proc: jobs[gid].processes) {
-//                        cout<<"waiting"<<endl;
-//
-//                        int ret;
-//                        waitpid(proc, &ret, 0);
-//                        if(!jobs[gid].running) {
-//                            cout<<"job "<<gid<<" sleeped"<<endl;
-//                            break;
-//                        }
-//                    }
-//                    cout<<"finished waiting for group "<<gid<<endl;
-//                    int returnCode;
-//                    stopped = false;
-//                    runningGID = pid;
-//                    if(signal(SIGINT, Executor::stop_handler) == 0) {
-//                        cout<<"signal attached"<<endl;
-//                    } else {
-//                        cout<<"signal not attached"<<endl;
-//                    }
-//                    waitpid(pid, &returnCode, 0);
-//
-//                    runningGID = 0;
-//                    if(stopped) {
-//                        cout<<"job "<<cmdStr<<" has been stopped"<<endl;
-//                    } else {
-//                        jobs.erase(jobs.find(pid));
-//                        cout << "job " << cmdStr << " returned with code: " << returnCode << endl;
-//                    }
-                }
-            } else {
-                cerr<<cmd.app<<" command not found"<<endl;
-            }
-        }
     }
+}
+
+// execute single command
+int Executor::execute(Command& cmd, string& cmdStr) {
+    if(isCmdInternal(cmd.app)) {
+        executeInternal(cmd);
+    } else {
+        int gid = -1;
+        executeExternal(cmd, cmdStr, gid);
+    }
+}
+
+// execute piped commands
+int Executor::execute(vector<Command>, string&) {
+
 }

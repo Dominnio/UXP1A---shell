@@ -17,13 +17,17 @@ Executor executor;
 void signalHandler( int signum ) {
     if(signum == SIGCHLD) {
         pid_t p;
-        int status;
+        int status = -1;
 
-        while ((p=waitpid(-1, &status, WNOHANG)) > 0)
+        while ((p=waitpid(-1, &status, WUNTRACED|WNOHANG)) > 0)
         {
-            executor.handle_child_death(p, status);
-            cout<<"Process "<<p<<" finished with code "<<status<<endl;
-            /* Handle the death of pid p */
+            if(WCOREDUMP(status) || WIFSIGNALED(status) || WIFEXITED(status)) {
+                executor.handle_child_death(p, status);
+                cout<<"Process "<<p<<" finished with code "<<status<<endl;
+            } else if(WIFSTOPPED(status)){
+                cout<<"stopped"<<endl;
+                executor.stop();
+            }
         }
     } else if(signum == SIGTSTP) {
         cout<<"Got SIGTSTP"<<endl;
@@ -50,6 +54,9 @@ public :
         signal(SIGCHLD, signalHandler);
         signal(SIGTSTP, signalHandler);
         signal(SIGINT, signalHandler);
+
+        signal (SIGTTIN, SIG_IGN);
+        signal (SIGTTOU, SIG_IGN);
         while(true)
         {
             try {
@@ -74,7 +81,9 @@ public :
         }
     }
 private:
-    Terminal() {};
+    Terminal() {
+        setsid();
+    };
     Terminal(Terminal const&) {};
     Terminal& operator=(Terminal const&) {};
     static Terminal* instance;

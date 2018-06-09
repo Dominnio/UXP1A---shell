@@ -15,6 +15,7 @@
 #include <climits>
 #include <lcms.h>
 #include <condition_variable>
+#include <termios.h>
 
 #define REDIR_IN true
 #define REDIR_OUT false
@@ -49,19 +50,24 @@ struct Job {
 
 class Executor {
 private:
-    std::unordered_map<int, Job> jobs;
-    int currentRunningGroup; //on fg
-//    static Executor* executor;
-
+    struct termios shell_tmodes;
+    std::vector<Job> jobs;
+    int currentRunningGroup = -1; //on fg
+    bool getExecPath(string& cmd, string& res);
+    bool isCmdInternal(string& cmd);
+    void executeInternal(Command& cmd);
+    void executeExternal(Command& cmd, string&, int& gid);
+    void getControl();
 public:
-
-//    Executor() {
-//        g_mutex.lock();
-//    }
+    Executor() {
+        tcgetattr (STDIN_FILENO, &shell_tmodes);
+        getControl();
+    }
+    int getCurrentGID(){return currentRunningGroup;}
     static sig_atomic_t runningGID;
     static sig_atomic_t stopped;
-    int execute(Command&, string&, int gid = -1);
-    int execute(vector<Command>);
+    int execute(Command&, string&);
+    int execute(vector<Command>, string&);
     void handle_child_death(int pid, int status);
     void stop();
     void wait_on_fg();
