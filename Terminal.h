@@ -2,13 +2,42 @@
 #define TERMINAL_H
 
 #include <unistd.h>
+#include <chrono>
+#include <csignal>
 #include "Parser.h"
 #include "Executor.h"
 
 using std::string;
+using std::cout;
+using std::endl;
+
+Executor executor;
+
+
+void signalHandler( int signum ) {
+    if(signum == SIGCHLD) {
+        pid_t p;
+        int status;
+
+        while ((p=waitpid(-1, &status, WNOHANG)) > 0)
+        {
+            executor.handle_child_death(p, status);
+            cout<<"Process "<<p<<" finished with code "<<status<<endl;
+            /* Handle the death of pid p */
+        }
+    } else if(signum == SIGTSTP) {
+        cout<<"Got SIGTSTP"<<endl;
+        executor.stop();
+    } else if(signum == SIGINT) {
+        executor.int_fg();
+    }
+    cout << "Interrupt XDDXD signal (" << signum << ") received.\n";
+}
 
 class Terminal
 {
+private:
+
 public :
     static Terminal& getInstance()
     {
@@ -18,16 +47,19 @@ public :
     void start()
     {
         Parser parser;
+        signal(SIGCHLD, signalHandler);
+        signal(SIGTSTP, signalHandler);
+        signal(SIGINT, signalHandler);
         while(true)
         {
             try {
                 std::cout << "[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName() << " " << getCurrentDir() <<"> ";
                 std::getline(std::cin,input);
                 parser.parse(input);
-                Executor executor;
                 for(auto& cmd: parser.getCommandList()) {
-                    executor.execute(cmd);
+                    executor.execute(cmd, input);
                 }
+                executor.wait_on_fg();
                 input.clear();
             }
             catch(ExitException &e)
