@@ -1,69 +1,20 @@
 #ifndef PARSER_H
 #define PARSER_H
 
-/*
- *  Created by Dominik on 26.05.2018.
- *
- * ================= OPIS SKLADOWYCH =================
- *
- *  std::string input   - parsowane wejście
- *
- *  std::string::iterator activeChar    - obecnie parsowany znak
- *
- *  SymType activeSym   - obecnie parsowany symbol
- *
- *  std::string spellIdent      - ostatnio pobrane słowo
- *
- *  std::list<Statement*> statementList     - lista Statementów gotowych do wykonania
- *
- * ================= OPIS METOD =================
- *
- * Metody w parserze ustawione są w kolejności od najmniej do najbardziej złożonej.
- * Te wcześniejsze z reguły korzystają z tych póżniejszych :
- *
- * nextChar(), prevChar() - przesuwają wskaźnik który wskazuje na aktualnie parsowany znak
- *
- * skipWhiteSpace() - pomija białe znaki
- *
- * accept(char c) - zjada znak z wejścia, jeśli nie jest taki jak podany w argumencie to rzuca wyjątkiem
- *
- * KeyWord(), KeySign() - rozpoznają symbole specjalne (np. $) oraz komendy wbudowane (np. cd)
- *
- * nextArg() - wczytuje argument (np. /etc/pssswd)
- *
- * nextOrder() - rozpoznaje komendę (np. ls)
- *
- * nextStatement() - rozpoznaje całe polecenie razem z agrumentami (np. ls -l /etc/network/)
- *
- * properStatement() - z komendy i argumentaów tworzy odpowiedni tej komendzie Statement
- *
- * parse(std::string _input) - główna funkcja, która parsuje całą linię, tworzy listę Statementów z ich argumentami
- *
- * execute() - funkcja, która wykonuje polecenia w kolejności od lewej do prawej
- *
- */
-
-#include "Statements/Statement.h"
-#include "Statements/AllStatements/CdStatement.h"
-#include "Statements/AllStatements/LsStatement.h"
-#include "Statements/AllStatements/PwdStatement.h"
-#include "Statements/AllStatements/EnvStatement.h"
-#include "Statements/AllStatements/ExeStatement.h"
-#include "Statements/AllStatements/FgStatement.h"
-#include "Statements/AllStatements/OutStatement.h"
-#include "Statements/AllStatements/BgStatement.h"
-#include "Statements/AllStatements/ExitStatement.h"
-#include "Statements/AllStatements/ExportStatement.h"
-
-#include "Exception.h"
+#include "Statement.h"
+#include "Arg.h"
 
 const int MAXIDENTSIZE = 100;
 const int MAXLINESIZE = 500;
 
+#define VARIABLE_SET_CMD "___set__variable__value"
+
 class Parser
 {
-public :
 
+    friend class ExportStatement;
+
+public :
     char nextChar()
     {
         return *(activeChar++);
@@ -92,165 +43,210 @@ public :
             throw SemanticException();
     }
 
-    SymType KeyWord()
-    {
-        for(auto iter = KeyWordMap.begin(); iter != KeyWordMap.end(); iter++)
-        {
-            if(spellIdent == (*iter).first)
-            {
-                return (*iter).second;
-            }
-        }
-        return identsy;
-    }
-
-    SymType KeySign()
-    {
-        if(activeChar == input.end())
-            return EOLsy;
-        for(auto iter = KeySignMap.begin(); iter != KeySignMap.end(); iter++)
-        {
-            bool thisIsThatSign = true;
-            int readChar = 0;
-            for(auto stringIter = (*iter).first.begin(); stringIter != (*iter).first.end(); stringIter++)
-            {
-                if(*activeChar != *stringIter)
-                {
-                    thisIsThatSign = false;
-                    break;
-                }
-                readChar++;
-                nextChar();
-            }
-            if(thisIsThatSign)
-            {
-                if((*iter).first.back() != ' ')
-                {
-                    if(*activeChar != ' ')
-                    {
-                        return (*iter).second;
-                    }
-                } else
-                {
-                    return (*iter).second;
-                }
-            }
-            for(int i = 0; i < readChar; i++)
-            {
-                prevChar();
-            }
-        }
-        return othersy;
-    }
-
-    std::string nextArg()
-    {
-        skipWhiteSpace();
-        std::string arg;
-        arg.clear();
-        while(!isspace((int)(*activeChar)) && *activeChar != '\0' && activeChar != input.end() && *activeChar != '|')
-            arg.push_back(nextChar());
-        return arg;
-    }
-
-    SymType nextOrder()
-    {
-        skipWhiteSpace();
-        activeSym = KeySign();
-        if(activeSym != othersy)
-        {
-            nextChar();
-            return activeSym;
-        }
-        spellIdent.clear();
-        do {
-            spellIdent.push_back(*activeChar);
-            nextChar();
-            if(spellIdent.size() > MAXIDENTSIZE)
-            {
-                std::cout << "Identyfikator jest za dlugi" << std::endl;
-                throw SemanticException();
-            }
-        }while(!isspace((int)(*activeChar)) && *activeChar != '\0');
-        activeSym = KeyWord();
-        return activeSym;
-    }
-
-    Statement* nextStatement()
-    {
-        auto order = nextOrder();
-        std::list<std::string> argList;
-        std::string arg;
-        while(nextArg().size() != 0)
-            argList.push_back(nextArg());
-        return properStatement(order, argList);
-    }
-
-    std::list<Statement*> parse(std::string _input)
+    void parse(std::string _input)
     {
         input = _input;
         activeChar = input.begin();
-        activeSym = STARTsy;
         if(input.length() > MAXLINESIZE)
         {
             std::cout << "Polecenie jest za dlugie" << std::endl  << std::flush;
             throw SemanticException();
         }
-        bool isStatement = false;
-        while(*activeChar != '\0')
+        while(*activeChar != '\0' && activeChar != input.end())
         {
-            if(isStatement)
+            statementList.push_back(parseStatement());
+            if(*activeChar == '|')
             {
-                isStatement = false;
-                accept('|');
-                continue;
+                nextChar();
             }
-            statementList.push_back(nextStatement());
-            isStatement = true;
         }
-        return statementList;
     }
 
-    Statement* properStatement(SymType order,std::list<std::string> argList)
+    Statement* parseStatement()
     {
-        if(order == cdsy)
-            return new CdStatement(argList);
-        if(order == lssy)
-            return new LsStatement(argList);
-        if(order == pwdsy)
-            return new PwdStatement(argList);
-        if(order == exitsy)
-            return new ExitStatement(argList);
-        if(order == exportsy)
-            return new ExportStatement(argList);
-        if(order == fgsy)
-            return new FgStatement(argList);
-        if(order == bgsy)
-            return new BgStatement(argList);
-        if(order == envsy)
-            return new EnvStatement(argList);
-        if(order == outsy)
-            return new OutStatement(argList);
-        if(order == exesy)
-            return new ExeStatement(argList);
-        if(order == identsy)
-            return new ExeStatement(argList);
-    };
+        std::list<Arg*> args;
+        while(*activeChar != '\0' && activeChar != input.end() && *activeChar != '|')
+        {
+            auto arg = parseArg();
+            if(arg != nullptr)
+                args.push_back(arg);
+        }
+        Arg* order;
+        std::list<Arg*> argList;
+        std::list<Arg*> redirectList;
+        bool isAmpersand = false;
 
-    void execute()
+        if((*(--args.end()))->getStr() == "&")
+        {
+            isAmpersand = true;
+            args.pop_back();
+        }
+        for(auto i = args.begin(); i != args.end(); )
+        {
+            std::string num;
+            bool isNumber = false;
+            auto j = (*i)->getStr().begin();
+            while(isdigit(*j))
+            {
+                isNumber = true;
+                num.push_back(*j);
+                j++;
+            }
+            if(*j == '>' || *j == '<')
+            {
+                if(!isNumber)
+                {
+                    if(*j == '>')
+                        num.push_back('1');
+                    else
+                        num.push_back('0');
+                }
+                auto remember = j;
+                auto todelete = i;
+                ++j;
+                if((j) == (*i)->getStr().end() || *j == '\0')
+                {
+                    if(++i != args.end())
+                    {
+                        (*i)->envsub();
+                        (*i)->dequota();
+                        if(*remember == '>')
+                            redirectList.push_back(new OutRedirectArg(atoi(num.c_str()),(*i)->getStr()));
+                        if(*remember == '<')
+                            redirectList.push_back(new InRedirectArg(atoi(num.c_str()),(*i)->getStr()));
+                        args.erase(todelete);
+                        args.erase(i);
+                        i = args.begin();
+                    }else{
+                        throw SemanticException();
+                    }
+                }else{
+                    std::string filename;
+                    while(j != ((*i)->getStr()).end() && *j != '\0')
+                    {
+                        filename.push_back(*j);
+                        j++;
+                    }
+                    (*i)->envsub();
+                    (*i)->dequota();
+                    if(*remember == '>')
+                        redirectList.push_back(new OutRedirectArg(atoi(num.c_str()),filename));
+                    if(*remember == '<')
+                        redirectList.push_back(new InRedirectArg(atoi(num.c_str()),filename));
+                    args.erase(i);
+                    i = args.begin();
+                }
+            }else{
+                i++;
+                continue;
+            }
+        }
+        for(auto i = args.begin(); i != args.end(); i++)
+        {
+            (*i)->envsub();
+            (*i)->dequota();
+        }
+        auto i = args.begin();
+        if(*i == NULL)
+        {
+            throw SemanticException();
+        }
+        order = new OrderArg((*i)->getStr());
+        i++;
+        while(i != args.end())
+        {
+            argList.push_back(new SimpleArg((*i)->getStr()));
+            i++;
+        }
+        return new Statement(order, argList, redirectList, isAmpersand);
+    }
+
+    Arg* parseArg()
+    {
+        skipWhiteSpace();
+        bool isQuota = false;
+        std::string spellArg;
+        while(((!(isspace((int)(*activeChar))) && *activeChar != '|') || isQuota) && *activeChar != '\0' && activeChar != input.end())
+        {
+            if(*activeChar == 39)
+            {
+                isQuota = !isQuota;
+                spellArg.push_back(nextChar());
+                continue;
+            }
+            if(isQuota)
+            {
+                spellArg.push_back(nextChar());
+                continue;
+            }
+            spellArg.push_back(nextChar());
+        }
+        if(spellArg.empty())
+        {
+            return nullptr;
+        }
+        return new Arg(spellArg);
+    }
+
+    void print()
     {
         for(auto iter = statementList.begin(); iter != statementList.end(); iter++)
         {
             (*iter)->execute();
         }
-        statementList.clear();
+//        statementList.clear();
     }
+
+    static bool parseSetVariableString(string& in, string& name, string& value) {
+        if(in.find('=') != std::string::npos) {
+            string var_name = in.substr(0, in.find('='));
+            string var_val = in.substr(in.find('=')+1);
+            for(auto c: var_name) {
+                if(!((c >= 48 && c < 58) || (c >= 65 && c < 91) || (c >= 97 && c < 127) || c == '_' || c == '-' || c== '?')) {
+                    return false;
+                }
+            }
+
+            name = var_name;
+            value = var_val;
+            return true;
+        }
+    }
+
+
+
+    vector<Command> getCommandList()
+    {
+        vector<Command> res;
+        for(auto iter = statementList.begin(); iter != statementList.end(); iter++)
+        {
+            auto&& cmd = (*iter)->toCommand();
+            parseSetVariable(cmd);
+            res.emplace_back(cmd);
+
+        }
+        statementList.clear();
+        return res;
+    }
+
 private:
-    std::string             input;
-    std::string::iterator   activeChar;
-    SymType                 activeSym;
-    std::string             spellIdent;
-    std::list<Statement*>   statementList;
+    std::string                         input;
+    std::string::iterator               activeChar;
+    std::list<Statement*>               statementList;
+    std::map<std::string,std::string>   enviroment;
+
+    void parseSetVariable(Command& cmd) {
+        string var_val;
+        string var_name;
+
+        if(parseSetVariableString(cmd.app, var_name, var_val)) {
+            cmd.app = VARIABLE_SET_CMD;
+            cmd.params.clear();
+            cmd.params.emplace_back(var_name);
+            cmd.params.emplace_back(var_val);
+            std::cout << "parsed variable set!" << std::endl;
+        }
+    }
 };
 
 

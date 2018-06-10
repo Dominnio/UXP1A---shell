@@ -1,58 +1,177 @@
 #ifndef TERMINAL_H
 #define TERMINAL_H
 
-/*
- *  Created by Dominik on 26.05.2018.
- *
- * ================= OPIS =================
- *
- * Ta klasa nie robi nic ciekawego. Po prostu uruchamia terminal i w kółko (do zamknięcia) wczytuje polecenia.
- *
- * Potem polecenie jest parsowane i wykonywane.
- *
- * Parsowanie i wykonanie polecenia może rzucić wyjątek, który jest tutaj łapany.
- *
- * W planach mam jeszcze dopisanie wątku, który będzie obsługiwał klawiaturę (np. strzałki w górę i w dół, ctrl+C).
- *
- */
-
 #include <unistd.h>
-
+#include <chrono>
+#include <csignal>
 #include "Parser.h"
+#include "Executor.h"
+#include "History.h"
 
 using std::string;
+using std::cout;
+using std::endl;
 
-const string getUserName() {
-    return string(getlogin());
-}
+Executor executor;
 
-const string getHostName() {
-    char hostname[64];
-    if(gethostname(hostname, 63) != -1) {
-        hostname[63] = 0;
-        return string(hostname);
+
+void signalHandler( int signum ) {
+    if(signum == SIGCHLD) {
+        pid_t p;
+        int status = -1;
+
+        while ((p=waitpid(-1, &status, WUNTRACED|WNOHANG)) > 0)
+        {
+            if(WCOREDUMP(status) || WIFSIGNALED(status) || WIFEXITED(status)) {
+                executor.handle_child_death(p, status);
+#ifdef DEBUG_MODE
+                cout<<"Process "<<p<<" finished with code "<<status<<endl;
+#endif
+            } else if(WIFSTOPPED(status)){
+#ifdef DEBUG_MODE
+                cout<<"stopped"<<endl;
+#endif
+                executor.stop();
+            }
+        }
+    } else if(signum == SIGTSTP) {
+#ifdef DEBUG_MODE
+        cout<<"Got SIGTSTP"<<endl;
+#endif
+        executor.stop();
+    } else if(signum == SIGINT) {
+        executor.int_fg();
     }
-
-    return "unknown";
+#ifdef DEBUG_MODE
+    cout << "Interrupt signal (" << signum << ") received.\n";
+#endif
 }
 
-const string getCurrentDir() {
-    char path[300];
-    if(getcwd(path, 299) != NULL) {
-        path[299] = 0;
-        return string(path);
-    }
-
-    return "error"; // xD
-}
 class Terminal
 {
+private:
+
 public :
     static Terminal& getInstance()
     {
         static Terminal instance;
         return instance;
     }
+    void start()
+    {
+        Parser parser;
+        signal(SIGCHLD, signalHandler);
+        signal(SIGTSTP, signalHandler);
+        signal(SIGINT, signalHandler);
+
+        signal (SIGTTIN, SIG_IGN);
+        signal (SIGTTOU, SIG_IGN);
+
+        std::cout << "\r[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName()
+                  << " " << getCurrentDir() << "> " <<input<<" \b"<<std::flush;
+
+        string lastPrintedInput = "";
+
+        while(true)
+        {
+            int c = getch();
+
+            if(c == 10 || c == 13) {
+                if(!input.empty()) {
+                    history.push(input);
+                    cout<<endl;
+                    try {
+                        parser.parse(input);
+#ifdef DEBUG_MODE
+                        parser.print();
+#endif
+                        auto &&commands = parser.getCommandList();
+                        if (commands.size() > 1) {
+                            executor.execute(commands, input);
+                        } else {
+                            executor.execute(*commands.begin(), input);
+                        }
+                        executor.wait_on_fg();
+                        input.clear();
+                    }
+                    catch (ExitException &e) {
+                        std::cout << e.what() << std::endl;
+                        break;
+                    }
+                    catch (std::exception &e) {
+                        std::cout << e.what() << std::endl;
+                        input.clear();
+                    }
+                }
+            } else if(c >= 32 && c < 127) {
+                input.push_back(c);
+            } else if(c == 4) {
+                break;
+            } else if(c == 127) {
+                if(!input.empty()) {
+                    input.pop_back();
+                } else {
+                    continue;
+                }
+
+            } else if(c == 27) {
+                c = getch();
+                if(c == '[') {
+                    c = getch();
+                    if(c == 'A') {
+                        input = history.getprev();
+                    } else if (c == 'B') {
+                        input = history.getnext();
+                    } else {
+                        input.push_back('[');
+                        input.push_back(c);
+                    }
+                } else {
+                    input.push_back(c);
+                }
+            } else {
+#ifdef DEBUG_MODE
+                cout<<endl<<"GOT: |"<<c<<"|"<<endl;
+#endif
+            }
+
+            std::cout << "\r[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName()
+                      << " " << getCurrentDir() << "> " <<input<<std::flush;
+
+            if(lastPrintedInput.size() > input.size()) {
+                for (int i = 0; i < lastPrintedInput.size() - input.size(); i++) {
+                    cout << " ";
+                }
+                for (int i = 0; i < lastPrintedInput.size() - input.size(); i++) {
+                    cout << "\b";
+                }
+            }
+
+            lastPrintedInput = input;
+        }
+    }
+
+    char getch()
+    {
+        char ch;
+        initTermios();
+        ch = getchar();
+        resetTermios();
+        return ch;
+    }
+
+private:
+    History& history = History::getInstance();
+
+    Terminal() {
+        setsid();
+    };
+    Terminal(Terminal const&) {};
+    Terminal& operator=(Terminal const&) {};
+    static Terminal* instance;
+
+    std::string input;
+
     const string currentDateTime()
     {
         time_t     now = time(0);
@@ -63,36 +182,45 @@ public :
 
         return string(buf);
     }
-    void start()
-    {
-        Parser parser;
-        while(true)
-        {
-            try {
-                std::cout << "[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName() << " " << getCurrentDir() <<">" ;
-                std::getline(std::cin,input);
-                parser.parse(input);
-                parser.execute();
-                input.clear();
-            }
-            catch(ExitException &e)
-            {
-                std::cout << e.what() << std::endl;
-                break;
-            }
-            catch(std::exception &e)
-            {
-                std::cout << e.what() << std::endl;
-            }
-        }
+
+    const string getUserName() {
+        return string(getlogin());
     }
-private:
-    Terminal() {};
-    Terminal(Terminal const&) {};
-    Terminal& operator=(Terminal const&) {};
-    static Terminal* instance;
 
-    std::string input;
+    const string getHostName() {
+        char hostname[64];
+        if(gethostname(hostname, 63) != -1) {
+            hostname[63] = 0;
+            return string(hostname);
+        }
 
+        return "unknown";
+    }
+
+    const string getCurrentDir() {
+        char path[300];
+        if(getcwd(path, 299) != NULL) {
+            path[299] = 0;
+            return string(path);
+        }
+
+        return "error";
+    }
+
+    struct termios old_modes, new_modes;
+
+    void initTermios()
+    {
+        tcgetattr(0, &old_modes);
+        new_modes = old_modes;
+        new_modes.c_lflag &= ~ICANON;
+        new_modes.c_lflag &= ~ECHO;
+        tcsetattr(0, TCSANOW, &new_modes);
+    }
+
+    void resetTermios()
+    {
+        tcsetattr(0, TCSANOW, &old_modes);
+    }
 };
 #endif // TERMINAL_H
