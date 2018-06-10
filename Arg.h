@@ -51,7 +51,7 @@ public:
                 {
                     i++;
                     auto b = i;
-                    while(isalnum(*i))
+                    while(isalnum(*i) || *i == '_' || *i =='-' || *i == '?')
                     {
                         envname.push_back(*i);
                         i++;
