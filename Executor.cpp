@@ -1,3 +1,4 @@
+#include <fcntl.h>
 #include "Executor.h"
 
 using std::cout;
@@ -6,6 +7,9 @@ using std::endl;
 
 #define F_EXIST 0
 #define F_EXECABLE 1
+
+#define PIPE_READ 0
+#define PIPE_WRITE 1
 
 uint8_t checkFile(const char* path) {
     struct stat sb;
@@ -146,9 +150,44 @@ void Executor::getControl() {
     }
 }
 
-void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid) {
+void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid, int in_pipe, int out_pipe) {
     string execable;
     if(getExecPath(cmd.app, execable)) {
+        bool in_redir = false;
+        bool out_redir = false;
+        for(auto& redir: cmd.redirections) {
+            if(redir.direction == REDIR_IN) {
+                redir.opened_file = open(redir.path.c_str(), O_RDONLY | O_CREAT, 0644);
+                if(redir.descriptor == STDIN_FILENO) {
+                    in_redir = true;
+                }
+            } else {
+                redir.opened_file = open(redir.path.c_str(), O_WRONLY | O_CREAT, 0644);
+                if(redir.descriptor == STDOUT_FILENO) {
+                    out_redir = true;
+                }
+            }
+
+            if(redir.opened_file == -1) {
+                perror(string("Cannot open file for redirection: " + redir.path).c_str());
+                return;
+            }
+        }
+
+        if(in_redir && in_pipe != -1) {
+            cout<<"double input redirection!"<<endl;
+            close(in_pipe);
+            in_pipe = -1;
+        }
+
+        cout<<"out_redir: "<<out_redir<<" out_pipe: "<<out_pipe<<endl;
+
+        if(out_redir && out_pipe != -1) {
+            cout<<"double output redirection!"<<endl;
+            close(out_pipe);
+            out_pipe = -1;
+        }
+
         int pid = fork();
         if (pid == -1) {
             cerr << "internal error: cannot fork" << endl;
@@ -162,7 +201,22 @@ void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid) {
             setpgid(0, gid);
 
             if(cmd.foreground) {
-                tcsetpgrp(STDIN_FILENO, getpid());
+                tcsetpgrp(STDIN_FILENO, gid);
+            }
+
+            for(auto& redir: cmd.redirections) {
+                dup2(redir.opened_file, redir.descriptor);
+                close(redir.opened_file);
+            }
+
+            if(in_pipe != -1) {
+                dup2(in_pipe, STDIN_FILENO);
+                close(in_pipe);
+            }
+
+            if(out_pipe != -1) {
+                dup2(out_pipe, STDOUT_FILENO);
+                close(out_pipe);
             }
 
             char **cmd_b = new char *[cmd.params.size() + 2];
@@ -202,12 +256,22 @@ void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid) {
             setpgid(pid, gid);
 
             if(cmd.foreground) {
-                tcsetpgrp(STDIN_FILENO, pid);
+                tcsetpgrp(STDIN_FILENO, gid);
                 currentRunningGroup = gid;
             } else {
                 currentRunningGroup = -1;
             }
 
+            for(auto& redir: cmd.redirections) {
+                close(redir.opened_file);
+            }
+
+            if(in_pipe != -1) {
+                close(in_pipe);
+            }
+            if(out_pipe != -1) {
+                close(out_pipe);
+            }
         }
     } else {
         cerr<<"Cannot execute: '"<<cmd.app<<"'"<<endl;
@@ -240,7 +304,8 @@ void Executor::executeInternal(Command& cmd) {
         currentRunningGroup = -1;
         for(auto& job: jobs) {
             cout<<"["<<pos<<"]: "<<job.command<<" ";
-            cout<<(job.running ? "running" : "stopped")<<endl;
+            cout<<(job.running ? "running" : "stopped")<<" (";
+            cout<<job.group<<")"<<endl;
             pos++;
         }
     } else if(cmd.app == "bg" || cmd.app == "fg"){
@@ -293,6 +358,18 @@ int Executor::execute(Command& cmd, string& cmdStr) {
 }
 
 // execute piped commands
-int Executor::execute(vector<Command>, string&) {
-
+int Executor::execute(vector<Command> cmds, string& cmd_str) {
+    int prevInPipe = -1;
+    int gid = -1;
+    for(int i = 0; i< cmds.size(); i++) {
+        if(i != cmds.size() - 1) {
+            int pipefd[2];
+            pipe(pipefd);
+            executeExternal(cmds[i], cmd_str, gid, prevInPipe, pipefd[PIPE_WRITE]);
+            prevInPipe = pipefd[PIPE_READ];
+        } else {
+            executeExternal(cmds[i], cmd_str, gid, prevInPipe);
+        }
+    }
+    cout<<"started group: "<<gid<<endl;
 }

@@ -26,6 +26,7 @@ using std::vector;
 struct Redirection {
     string path;
     int descriptor;
+    int opened_file = -1;
     bool direction;
     Redirection(string s, int de, bool di): path(std::move(s)), descriptor(de), direction(di) {}
 };
@@ -56,7 +57,7 @@ private:
     bool getExecPath(string& cmd, string& res);
     bool isCmdInternal(string& cmd);
     void executeInternal(Command& cmd);
-    void executeExternal(Command& cmd, string&, int& gid);
+    void executeExternal(Command& cmd, string&, int& gid, int in_pipe = -1, int out_pipe = -1);
     void getControl();
 public:
     Executor() {

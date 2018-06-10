@@ -63,8 +63,12 @@ public :
                 std::cout << "[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName() << " " << getCurrentDir() <<"> ";
                 std::getline(std::cin,input);
                 parser.parse(input);
-                for(auto& cmd: parser.getCommandList()) {
-                    executor.execute(cmd, input);
+                parser.print();
+                auto&& commands = parser.getCommandList();
+                if(commands.size() > 1) {
+                    executor.execute(commands, input);
+                } else {
+                    executor.execute(*commands.begin(), input);
                 }
                 executor.wait_on_fg();
                 input.clear();
