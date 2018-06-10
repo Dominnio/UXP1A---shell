@@ -82,14 +82,23 @@ public :
         for(auto i = args.begin(); i != args.end(); )
         {
             std::string num;
+            bool isNumber = false;
             auto j = (*i)->getStr().begin();
             while(isdigit(*j))
             {
+                isNumber = true;
                 num.push_back(*j);
                 j++;
             }
             if(*j == '>' || *j == '<')
             {
+                if(!isNumber)
+                {
+                    if(*j == '>')
+                        num.push_back('1');
+                    else
+                        num.push_back('0');
+                }
                 auto remember = j;
                 auto todelete = i;
                 ++j;
