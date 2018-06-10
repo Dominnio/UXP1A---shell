@@ -63,7 +63,7 @@ public:
                     auto name = getenv(envname.c_str());
                     if(name == nullptr)
                     {
-                        std::cout << "Uzyto nieistniejacej zmiennej srodowiskowej\n";
+                        std::cout << "Uzyto nieistniejacej zmiennej srodowiskowej " + envname + "\n";
                         throw SemanticException();
                     }
                     str.replace(j,j++,name);

@@ -92,6 +92,7 @@ public :
                     }
                     catch (std::exception &e) {
                         std::cout << e.what() << std::endl;
+                        input.clear();
                     }
                 }
             } else if(c >= 32 && c < 127) {
@@ -125,7 +126,7 @@ public :
                     input.push_back(c);
                 }
             } else {
-                cout<<endl<<"GOT: |"<<(int) c<<"|"<<endl;
+                cout<<endl<<"GOT: |"<<c<<"|"<<endl;
             }
 
             std::cout << "\r[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName()

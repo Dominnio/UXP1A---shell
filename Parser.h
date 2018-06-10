@@ -7,6 +7,8 @@
 const int MAXIDENTSIZE = 100;
 const int MAXLINESIZE = 500;
 
+#define VARIABLE_SET_CMD "___set__variable__value"
+
 class Parser
 {
 
@@ -195,12 +197,33 @@ public :
 //        statementList.clear();
     }
 
+    static bool parseSetVariableString(string& in, string& name, string& value) {
+        if(in.find('=') != std::string::npos) {
+            string var_name = in.substr(0, in.find('='));
+            string var_val = in.substr(in.find('=')+1);
+            for(auto c: var_name) {
+                if(!((c >= 48 && c < 58) || (c >= 65 && c < 91) || (c >= 97 && c < 127) || c == '_' || c == '-' || c== '?')) {
+                    return false;
+                }
+            }
+
+            name = var_name;
+            value = var_val;
+            return true;
+        }
+    }
+
+
+
     vector<Command> getCommandList()
     {
         vector<Command> res;
         for(auto iter = statementList.begin(); iter != statementList.end(); iter++)
         {
-            res.emplace_back((*iter)->toCommand());
+            auto&& cmd = (*iter)->toCommand();
+            parseSetVariable(cmd);
+            res.emplace_back(cmd);
+
         }
         statementList.clear();
         return res;
@@ -211,6 +234,19 @@ private:
     std::string::iterator               activeChar;
     std::list<Statement*>               statementList;
     std::map<std::string,std::string>   enviroment;
+
+    void parseSetVariable(Command& cmd) {
+        string var_val;
+        string var_name;
+
+        if(parseSetVariableString(cmd.app, var_name, var_val)) {
+            cmd.app = VARIABLE_SET_CMD;
+            cmd.params.clear();
+            cmd.params.emplace_back(var_name);
+            cmd.params.emplace_back(var_val);
+            std::cout << "parsed variable set!" << std::endl;
+        }
+    }
 };
 
 

@@ -1,5 +1,6 @@
 #include <fcntl.h>
 #include "Executor.h"
+#include "Parser.h"
 
 using std::cout;
 using std::cerr;
@@ -43,7 +44,7 @@ void Executor::handle_child_death(int pid, int status) {
         auto& job = *it;
         if(job.processes.erase(pid)) {
             job.dead_cnt++;
-            cout<<"process "<<pid<<" from group "<<job.group<<" finished with code "<<status<<endl;
+            cout<<"process "<<pid<<" from group "<<job.group<<" finished with code "<<WEXITSTATUS(status)<<" (status: "<<status<<")"<<endl;
             if(pid == job.last_pid) {
                 job.return_code = status;
                 cout<<"it was the last launched process, saving return code"<<endl;
@@ -55,6 +56,9 @@ void Executor::handle_child_death(int pid, int status) {
                 cout<<"Got control"<<endl;
                 currentRunningGroup = -1;
                 jobs.erase(it);
+                if(setenv("?", std::to_string(WEXITSTATUS(status)).c_str(), 1) == -1) {
+                    perror("setting return code variable");
+                }
                 //TODO clean up
             } else {
                 cout<<job.processes.size();
@@ -139,7 +143,7 @@ bool Executor::getExecPath(string& cmd, string& res) {
 }
 
 bool Executor::isCmdInternal(string& cmd) {
-    static std::unordered_set<string> internals{"exit", "jobs", "fg", "bg", "cd"};
+    static std::unordered_set<string> internals{"exit", "jobs", "fg", "bg", "cd", "pwd", "export", VARIABLE_SET_CMD};
     return internals.find(cmd) != internals.end();
 }
 
@@ -342,8 +346,36 @@ void Executor::executeInternal(Command& cmd) {
         }
         killpg(job.group, SIGCONT);
 
-    } else if(cmd.app == "exit"){
+    } else if(cmd.app == "exit") {
         exit(0);
+    } else if(cmd.app == VARIABLE_SET_CMD) {
+//        cout<<"setting variable: "<<cmd.params[0]<<":"<<cmd.params[1]<<endl;
+        if(!cmd.params[1].empty()) {
+            setenv(cmd.params[0].c_str(), cmd.params[1].c_str(), 1);
+        } else {
+            unsetenv(cmd.params[0].c_str());
+        }
+    } else if(cmd.app == "pwd") {
+        char path[300];
+        if(getcwd(path, 299) != NULL) {
+            path[299] = 0;
+            cout<<path<<endl;
+        } else {
+            cout<<"Error while getting current path"<<endl;
+        }
+    } else if(cmd.app == "export") {
+        if(cmd.params.size() != 1) {
+            cout<<"wrong params for export provided"<<endl;
+        } else {
+            string val, name;
+            if(Parser::parseSetVariableString(cmd.params[0], name, val)) {
+                if(val.size() > 0) {
+                    setenv(name.c_str(), val.c_str(), 1);
+                } else {
+                    unsetenv(name.c_str());
+                }
+            }
+        }
     }
 }
 
@@ -359,9 +391,15 @@ int Executor::execute(Command& cmd, string& cmdStr) {
 
 // execute piped commands
 int Executor::execute(vector<Command> cmds, string& cmd_str) {
+    for(auto& cmd: cmds){
+        if(isCmdInternal(cmd.app)) {
+            cerr<<"cannot use internal command ("<<cmd.app<<") with pipes"<<endl;
+            return 0;
+        }
+    }
     int prevInPipe = -1;
     int gid = -1;
-    for(int i = 0; i< cmds.size(); i++) {
+    for(int i = 0; i < cmds.size(); i++) {
         if(i != cmds.size() - 1) {
             int pipefd[2];
             pipe(pipefd);
