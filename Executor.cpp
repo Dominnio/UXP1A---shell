@@ -44,25 +44,38 @@ void Executor::handle_child_death(int pid, int status) {
         auto& job = *it;
         if(job.processes.erase(pid)) {
             job.dead_cnt++;
-            cout<<"process "<<pid<<" from group "<<job.group<<" finished with code "<<WEXITSTATUS(status)<<" (status: "<<status<<")"<<endl;
+#ifndef DEBUG_MODE
+            if(currentRunningGroup == -1) {
+#endif
+                cout << endl << "process " << pid << " from group " << job.group << " finished with code "
+                     << WEXITSTATUS(status) << " (status: " << status << ")" << endl;
+#ifndef DEBUG_MODE
+            }
+#endif
             if(pid == job.last_pid) {
                 job.return_code = status;
+#ifdef DEBUG_MODE
                 cout<<"it was the last launched process, saving return code"<<endl;
+#endif
             }
             if(job.processes.empty()) {
-                getControl();
+#ifdef DEBUG_MODE
                 cout<<"all processes from group has finished"<<endl;
+#endif
                 getControl();
+#ifdef DEBUG_MODE
                 cout<<"Got control"<<endl;
+#endif
                 currentRunningGroup = -1;
                 jobs.erase(it);
                 if(setenv("?", std::to_string(WEXITSTATUS(status)).c_str(), 1) == -1) {
                     perror("setting return code variable");
                 }
-                //TODO clean up
             } else {
+#ifdef DEBUG_MODE
                 cout<<job.processes.size();
                 cout<<" processes from group are still running"<<endl;
+#endif
             }
             break;
         }
@@ -79,15 +92,21 @@ void Executor::wait_on_fg() {
 
 void Executor::int_fg() {
     if(currentRunningGroup != -1) {
+#ifdef DEBUG_MODE
         cout<<"sending SIGINT to "<<currentRunningGroup<<endl;
+#endif
         killpg(currentRunningGroup, SIGINT);
     }
 }
 
 void Executor::stop() {
+#ifdef DEBUG_MODE
     cout<<"stopping"<<endl;
+#endif
     if(currentRunningGroup == -1) {
+#ifdef DEBUG_MODE
         cout<<"no running processes"<<endl;
+#endif
         return;
     } else {
         killpg(currentRunningGroup, SIGSTOP);
@@ -179,22 +198,28 @@ void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid, int in_pi
         }
 
         if(in_redir && in_pipe != -1) {
+#ifdef DEBUG_MODE
             cout<<"double input redirection!"<<endl;
+#endif
             close(in_pipe);
             in_pipe = -1;
         }
 
+#ifdef DEBUG_MODE
         cout<<"out_redir: "<<out_redir<<" out_pipe: "<<out_pipe<<endl;
+#endif
 
         if(out_redir && out_pipe != -1) {
+#ifdef DEBUG_MODE
             cout<<"double output redirection!"<<endl;
+#endif
             close(out_pipe);
             out_pipe = -1;
         }
 
         int pid = fork();
         if (pid == -1) {
-            cerr << "internal error: cannot fork" << endl;
+            cerr << "INTERNAL ERROR: cannot fork" << endl;
         } else if (pid == 0) {
             setDefaultSignals();
 
@@ -337,8 +362,9 @@ void Executor::executeInternal(Command& cmd) {
         }
 
         Job& job = jobs[job_num];
-
+#ifdef DEBUG_MODE
         cout<<"Starting "<<job.group<<endl;
+#endif
         job.running = true;
         if(cmd.app == "fg") {
             currentRunningGroup = job.group;
@@ -409,5 +435,7 @@ int Executor::execute(vector<Command> cmds, string& cmd_str) {
             executeExternal(cmds[i], cmd_str, gid, prevInPipe);
         }
     }
+#ifdef DEBUG_MODE
     cout<<"started group: "<<gid<<endl;
+#endif
 }

@@ -24,19 +24,27 @@ void signalHandler( int signum ) {
         {
             if(WCOREDUMP(status) || WIFSIGNALED(status) || WIFEXITED(status)) {
                 executor.handle_child_death(p, status);
+#ifdef DEBUG_MODE
                 cout<<"Process "<<p<<" finished with code "<<status<<endl;
+#endif
             } else if(WIFSTOPPED(status)){
+#ifdef DEBUG_MODE
                 cout<<"stopped"<<endl;
+#endif
                 executor.stop();
             }
         }
     } else if(signum == SIGTSTP) {
+#ifdef DEBUG_MODE
         cout<<"Got SIGTSTP"<<endl;
+#endif
         executor.stop();
     } else if(signum == SIGINT) {
         executor.int_fg();
     }
+#ifdef DEBUG_MODE
     cout << "Interrupt XDDXD signal (" << signum << ") received.\n";
+#endif
 }
 
 class Terminal
@@ -76,7 +84,9 @@ public :
                     cout<<endl;
                     try {
                         parser.parse(input);
+#ifdef DEBUG_MODE
                         parser.print();
+#endif
                         auto &&commands = parser.getCommandList();
                         if (commands.size() > 1) {
                             executor.execute(commands, input);
@@ -126,7 +136,9 @@ public :
                     input.push_back(c);
                 }
             } else {
+#ifdef DEBUG_MODE
                 cout<<endl<<"GOT: |"<<c<<"|"<<endl;
+#endif
             }
 
             std::cout << "\r[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName()
