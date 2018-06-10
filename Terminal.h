@@ -6,6 +6,7 @@
 #include <csignal>
 #include "Parser.h"
 #include "Executor.h"
+#include "History.h"
 
 using std::string;
 using std::cout;
@@ -57,34 +58,104 @@ public :
 
         signal (SIGTTIN, SIG_IGN);
         signal (SIGTTOU, SIG_IGN);
+
+        std::cout << "\r[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName()
+                  << " " << getCurrentDir() << "> " <<input<<" \b"<<std::flush;
+
+        string lastPrintedInput = "";
+
         while(true)
         {
-            try {
-                std::cout << "[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName() << " " << getCurrentDir() <<"> ";
-                std::getline(std::cin,input);
-                parser.parse(input);
-                parser.print();
-                auto&& commands = parser.getCommandList();
-                if(commands.size() > 1) {
-                    executor.execute(commands, input);
-                } else {
-                    executor.execute(*commands.begin(), input);
+            int c = getch();
+
+//            cout<<endl<<"GOT: |"<<(int) c<<"|"<<endl;
+
+            if(c == 10 || c == 13) {
+                if(!input.empty()) {
+                    history.push(input);
+                    cout<<endl;
+                    try {
+                        parser.parse(input);
+                        parser.print();
+                        auto &&commands = parser.getCommandList();
+                        if (commands.size() > 1) {
+                            executor.execute(commands, input);
+                        } else {
+                            executor.execute(*commands.begin(), input);
+                        }
+                        executor.wait_on_fg();
+                        input.clear();
+                    }
+                    catch (ExitException &e) {
+                        std::cout << e.what() << std::endl;
+                        break;
+                    }
+                    catch (std::exception &e) {
+                        std::cout << e.what() << std::endl;
+                    }
                 }
-                executor.wait_on_fg();
-                input.clear();
-            }
-            catch(ExitException &e)
-            {
-                std::cout << e.what() << std::endl;
+            } else if(c >= 32 && c < 127) {
+                input.push_back(c);
+            } else if(c == 4) {
                 break;
+            } else if(c == 127) {
+                if(!input.empty()) {
+                    input.pop_back();
+                } else {
+                    continue;
+                }
+
+            } else if(c == 27) {
+                c = getch();
+                if(c == '[') {
+                    c = getch();
+                    if(c == 'A') {
+//                        cout<<endl<<"ARROW UP"<<endl;
+//                        cout<<history.getprev()<<endl;
+                        input = history.getprev();
+                    } else if (c == 'B') {
+//                        cout<<endl<<"ARROW DOWN"<<endl;
+//                        cout<<history.getnext()<<endl;
+                        input = history.getnext();
+                    } else {
+                        input.push_back('[');
+                        input.push_back(c);
+                    }
+                } else {
+                    input.push_back(c);
+                }
+            } else {
+                cout<<endl<<"GOT: |"<<(int) c<<"|"<<endl;
             }
-            catch(std::exception &e)
-            {
-                std::cout << e.what() << std::endl;
+
+            std::cout << "\r[" << currentDateTime() << "] " << getUserName() <<"@"<< getHostName()
+                      << " " << getCurrentDir() << "> " <<input<<std::flush;
+
+            if(lastPrintedInput.size() > input.size()) {
+                for (int i = 0; i < lastPrintedInput.size() - input.size(); i++) {
+                    cout << " ";
+                }
+                for (int i = 0; i < lastPrintedInput.size() - input.size(); i++) {
+                    cout << "\b";
+                }
             }
+
+            lastPrintedInput = input;
         }
     }
+
+    char getch()
+    {
+        char ch;
+        initTermios();
+        ch = getchar();
+        resetTermios();
+        return ch;
+    }
+
 private:
+    History& history = History::getInstance();
+
     Terminal() {
         setsid();
     };
@@ -127,6 +198,22 @@ private:
         }
 
         return "error"; // xD
+    }
+
+    struct termios old_modes, new_modes;
+
+    void initTermios()
+    {
+        tcgetattr(0, &old_modes); /* grab old terminal i/o settings */
+        new_modes = old_modes; /* make new settings same as old settings */
+        new_modes.c_lflag &= ~ICANON; /* disable buffered i/o */
+        new_modes.c_lflag &= ~ECHO; /* set no echo mode */
+        tcsetattr(0, TCSANOW, &new_modes); /* use these new terminal i/o settings now */
+    }
+
+    void resetTermios()
+    {
+        tcsetattr(0, TCSANOW, &old_modes);
     }
 };
 #endif // TERMINAL_H
