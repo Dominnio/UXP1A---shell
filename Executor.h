@@ -45,7 +45,6 @@ struct Job {
     int last_pid;
     int return_code;
     bool running;
-//    bool valid = false;
     std::unordered_set<int> processes; //<pid>
 };
 
@@ -57,7 +56,7 @@ private:
     bool getExecPath(string& cmd, string& res);
     bool isCmdInternal(string& cmd);
     void executeInternal(Command& cmd);
-    void executeExternal(Command& cmd, string&, int& gid, int in_pipe = -1, int out_pipe = -1);
+    void executeExternal(Command& cmd, string&, int& gid, int in_pipe = -1, int out_pipe = -1, bool last_one = true);
     void getControl();
 public:
     Executor() {

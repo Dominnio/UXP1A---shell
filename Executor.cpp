@@ -57,6 +57,9 @@ void Executor::handle_child_death(int pid, int status) {
 #ifdef DEBUG_MODE
                 cout<<"it was the last launched process, saving return code"<<endl;
 #endif
+                if(setenv("?", std::to_string(WEXITSTATUS(status)).c_str(), 1) == -1) {
+                    perror("setting return code variable");
+                }
             }
             if(job.processes.empty()) {
 #ifdef DEBUG_MODE
@@ -68,9 +71,6 @@ void Executor::handle_child_death(int pid, int status) {
 #endif
                 currentRunningGroup = -1;
                 jobs.erase(it);
-                if(setenv("?", std::to_string(WEXITSTATUS(status)).c_str(), 1) == -1) {
-                    perror("setting return code variable");
-                }
             } else {
 #ifdef DEBUG_MODE
                 cout<<job.processes.size();
@@ -167,13 +167,13 @@ bool Executor::isCmdInternal(string& cmd) {
 }
 
 void Executor::getControl() {
-    tcsetattr (STDIN_FILENO, TCSADRAIN, &shell_tmodes);
+    //tcsetattr (STDIN_FILENO, TCSADRAIN, &shell_tmodes);
     if (tcsetpgrp(STDIN_FILENO, getpid())) {
         perror("tcsetpgrp failed");
     }
 }
 
-void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid, int in_pipe, int out_pipe) {
+void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid, int in_pipe, int out_pipe, bool last_one) {
     string execable;
     if(getExecPath(cmd.app, execable)) {
         bool in_redir = false;
@@ -265,12 +265,18 @@ void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid, int in_pi
                 tmp.group = gid;
                 tmp.processes.insert(pid);
                 tmp.running = true;
+                if(last_one) {
+                    tmp.last_pid = pid;
+                }
                 jobs.emplace_back(tmp);
             } else {
                 bool found = false;
                 for(auto& job: jobs) {
                     if(job.group == gid) {
                         job.processes.insert(pid);
+                        if(last_one) {
+                            job.last_pid = pid;
+                        }
                         found = true;
                         break;
                     }
@@ -417,19 +423,33 @@ int Executor::execute(Command& cmd, string& cmdStr) {
 
 // execute piped commands
 int Executor::execute(vector<Command> cmds, string& cmd_str) {
-    for(auto& cmd: cmds){
+    bool is_group_in_background = false;
+    for(int i = 0; i < cmds.size(); i++){
+        auto& cmd = cmds[i];
         if(isCmdInternal(cmd.app)) {
             cerr<<"cannot use internal command ("<<cmd.app<<") with pipes"<<endl;
             return 0;
+        }
+        if(!cmd.foreground) {
+            if(i != cmds.size() - 1) {
+                cerr << "cannot launch intermediate pipe command in background" << endl;
+                return 0;
+            } else {
+                is_group_in_background = true;
+            }
         }
     }
     int prevInPipe = -1;
     int gid = -1;
     for(int i = 0; i < cmds.size(); i++) {
+        if(is_group_in_background) {
+            cmds[i].foreground = false;
+        }
+
         if(i != cmds.size() - 1) {
             int pipefd[2];
             pipe(pipefd);
-            executeExternal(cmds[i], cmd_str, gid, prevInPipe, pipefd[PIPE_WRITE]);
+            executeExternal(cmds[i], cmd_str, gid, prevInPipe, pipefd[PIPE_WRITE], false);
             prevInPipe = pipefd[PIPE_READ];
         } else {
             executeExternal(cmds[i], cmd_str, gid, prevInPipe);

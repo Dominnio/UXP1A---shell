@@ -43,7 +43,7 @@ void signalHandler( int signum ) {
         executor.int_fg();
     }
 #ifdef DEBUG_MODE
-    cout << "Interrupt XDDXD signal (" << signum << ") received.\n";
+    cout << "Interrupt signal (" << signum << ") received.\n";
 #endif
 }
 
@@ -75,8 +75,6 @@ public :
         while(true)
         {
             int c = getch();
-
-//            cout<<endl<<"GOT: |"<<(int) c<<"|"<<endl;
 
             if(c == 10 || c == 13) {
                 if(!input.empty()) {
@@ -121,12 +119,8 @@ public :
                 if(c == '[') {
                     c = getch();
                     if(c == 'A') {
-//                        cout<<endl<<"ARROW UP"<<endl;
-//                        cout<<history.getprev()<<endl;
                         input = history.getprev();
                     } else if (c == 'B') {
-//                        cout<<endl<<"ARROW DOWN"<<endl;
-//                        cout<<history.getnext()<<endl;
                         input = history.getnext();
                     } else {
                         input.push_back('[');
@@ -210,18 +204,18 @@ private:
             return string(path);
         }
 
-        return "error"; // xD
+        return "error";
     }
 
     struct termios old_modes, new_modes;
 
     void initTermios()
     {
-        tcgetattr(0, &old_modes); /* grab old terminal i/o settings */
-        new_modes = old_modes; /* make new settings same as old settings */
-        new_modes.c_lflag &= ~ICANON; /* disable buffered i/o */
-        new_modes.c_lflag &= ~ECHO; /* set no echo mode */
-        tcsetattr(0, TCSANOW, &new_modes); /* use these new terminal i/o settings now */
+        tcgetattr(0, &old_modes);
+        new_modes = old_modes;
+        new_modes.c_lflag &= ~ICANON;
+        new_modes.c_lflag &= ~ECHO;
+        tcsetattr(0, TCSANOW, &new_modes);
     }
 
     void resetTermios()
