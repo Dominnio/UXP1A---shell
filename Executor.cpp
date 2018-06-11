@@ -215,21 +215,15 @@ void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid, int in_pi
         out_pipe = -1;
     }
 
+    char sync_buf[1];
+    int sync_pipe[2];
+    pipe(sync_pipe);
+
     int pid = fork();
     if (pid == -1) {
         cerr << "INTERNAL ERROR: cannot fork" << endl;
     } else if (pid == 0) {
         setDefaultSignals();
-
-        if (gid == -1) {
-            gid = getpid();
-        }
-
-        setpgid(0, gid);
-
-        if(cmd.foreground) {
-            tcsetpgrp(STDIN_FILENO, gid);
-        }
 
         for(auto& redir: cmd.redirections) {
             dup2(redir.opened_file, redir.descriptor);
@@ -253,6 +247,12 @@ void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid, int in_pi
             cmd_b[pos++] = strdup(param.c_str());
         }
         cmd_b[pos] = nullptr;
+
+        read(sync_pipe[PIPE_READ], sync_buf, 1);
+
+        close(sync_pipe[PIPE_READ]);
+        close(sync_pipe[PIPE_WRITE]);
+
         execv(cmd.path.c_str(), cmd_b);
     } else {
         if (gid == -1) {
@@ -305,6 +305,12 @@ void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid, int in_pi
         if(out_pipe != -1) {
             close(out_pipe);
         }
+
+        sync_buf[0] = 'r';
+        write(sync_pipe[PIPE_WRITE], sync_buf, 1);
+
+        close(sync_pipe[PIPE_READ]);
+        close(sync_pipe[PIPE_WRITE]);
     }
 }
 
