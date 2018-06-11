@@ -77,6 +77,11 @@ public :
             if(arg != nullptr)
                 args.push_back(arg);
         }
+        if(args.empty())
+        {
+            std::cout << "Podano puste polecenie" << std::endl << std::flush;
+            throw SemanticException();
+        }
         Arg* order;
         std::list<Arg*> argList;
         std::list<Arg*> redirectList;
