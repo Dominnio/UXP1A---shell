@@ -47,6 +47,7 @@ public :
     {
         input = _input;
         activeChar = input.begin();
+        statementList.clear();
         if(input.length() > MAXLINESIZE)
         {
             std::cout << "Polecenie jest za dlugie" << std::endl  << std::flush;
@@ -54,6 +55,11 @@ public :
         }
         while(*activeChar != '\0' && activeChar != input.end())
         {
+            if(*activeChar == '|')
+            {
+                std::cout << "Podano puste polecenie" << std::endl << std::flush;
+                throw SemanticException();
+            }
             statementList.push_back(parseStatement());
             if(*activeChar == '|')
             {
