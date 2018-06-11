@@ -174,142 +174,137 @@ void Executor::getControl() {
 }
 
 void Executor::executeExternal(Command &cmd, string& cmdStr, int& gid, int in_pipe, int out_pipe, bool last_one) {
-    string execable;
-    if(getExecPath(cmd.app, execable)) {
-        bool in_redir = false;
-        bool out_redir = false;
+    bool in_redir = false;
+    bool out_redir = false;
+    for(auto& redir: cmd.redirections) {
+        if(redir.direction == REDIR_IN) {
+            redir.opened_file = open(redir.path.c_str(), O_RDONLY | O_CREAT, 0644);
+            if(redir.descriptor == STDIN_FILENO) {
+                in_redir = true;
+            }
+        } else {
+            redir.opened_file = open(redir.path.c_str(), O_WRONLY | O_CREAT, 0644);
+            if(redir.descriptor == STDOUT_FILENO) {
+                out_redir = true;
+            }
+        }
+
+        if(redir.opened_file == -1) {
+            perror(string("Cannot open file for redirection: " + redir.path).c_str());
+            return;
+        }
+    }
+
+    if(in_redir && in_pipe != -1) {
+#ifdef DEBUG_MODE
+        cout<<"double input redirection!"<<endl;
+#endif
+        close(in_pipe);
+        in_pipe = -1;
+    }
+
+#ifdef DEBUG_MODE
+    cout<<"out_redir: "<<out_redir<<" out_pipe: "<<out_pipe<<endl;
+#endif
+
+    if(out_redir && out_pipe != -1) {
+#ifdef DEBUG_MODE
+        cout<<"double output redirection!"<<endl;
+#endif
+        close(out_pipe);
+        out_pipe = -1;
+    }
+
+    int pid = fork();
+    if (pid == -1) {
+        cerr << "INTERNAL ERROR: cannot fork" << endl;
+    } else if (pid == 0) {
+        setDefaultSignals();
+
+        if (gid == -1) {
+            gid = getpid();
+        }
+
+        setpgid(0, gid);
+
+        if(cmd.foreground) {
+            tcsetpgrp(STDIN_FILENO, gid);
+        }
+
         for(auto& redir: cmd.redirections) {
-            if(redir.direction == REDIR_IN) {
-                redir.opened_file = open(redir.path.c_str(), O_RDONLY | O_CREAT, 0644);
-                if(redir.descriptor == STDIN_FILENO) {
-                    in_redir = true;
-                }
-            } else {
-                redir.opened_file = open(redir.path.c_str(), O_WRONLY | O_CREAT, 0644);
-                if(redir.descriptor == STDOUT_FILENO) {
-                    out_redir = true;
+            dup2(redir.opened_file, redir.descriptor);
+            close(redir.opened_file);
+        }
+
+        if(in_pipe != -1) {
+            dup2(in_pipe, STDIN_FILENO);
+            close(in_pipe);
+        }
+
+        if(out_pipe != -1) {
+            dup2(out_pipe, STDOUT_FILENO);
+            close(out_pipe);
+        }
+
+        char **cmd_b = new char *[cmd.params.size() + 2];
+        cmd_b[0] = strdup(cmd.app.c_str());
+        int pos = 1;
+        for (auto &param: cmd.params) {
+            cmd_b[pos++] = strdup(param.c_str());
+        }
+        cmd_b[pos] = nullptr;
+        execv(cmd.path.c_str(), cmd_b);
+    } else {
+        if (gid == -1) {
+            gid = pid;
+
+            Job tmp;
+            tmp.command = cmdStr;
+            tmp.group = gid;
+            tmp.processes.insert(pid);
+            tmp.running = true;
+            if(last_one) {
+                tmp.last_pid = pid;
+            }
+            jobs.emplace_back(tmp);
+        } else {
+            bool found = false;
+            for(auto& job: jobs) {
+                if(job.group == gid) {
+                    job.processes.insert(pid);
+                    if(last_one) {
+                        job.last_pid = pid;
+                    }
+                    found = true;
+                    break;
                 }
             }
 
-            if(redir.opened_file == -1) {
-                perror(string("Cannot open file for redirection: " + redir.path).c_str());
+            if(!found) {
+                cerr<<"INTERNAL ERROR: wrong gid provided!"<<endl;
                 return;
             }
         }
 
-        if(in_redir && in_pipe != -1) {
-#ifdef DEBUG_MODE
-            cout<<"double input redirection!"<<endl;
-#endif
-            close(in_pipe);
-            in_pipe = -1;
-        }
+        setpgid(pid, gid);
 
-#ifdef DEBUG_MODE
-        cout<<"out_redir: "<<out_redir<<" out_pipe: "<<out_pipe<<endl;
-#endif
-
-        if(out_redir && out_pipe != -1) {
-#ifdef DEBUG_MODE
-            cout<<"double output redirection!"<<endl;
-#endif
-            close(out_pipe);
-            out_pipe = -1;
-        }
-
-        int pid = fork();
-        if (pid == -1) {
-            cerr << "INTERNAL ERROR: cannot fork" << endl;
-        } else if (pid == 0) {
-            setDefaultSignals();
-
-            if (gid == -1) {
-                gid = getpid();
-            }
-
-            setpgid(0, gid);
-
-            if(cmd.foreground) {
-                tcsetpgrp(STDIN_FILENO, gid);
-            }
-
-            for(auto& redir: cmd.redirections) {
-                dup2(redir.opened_file, redir.descriptor);
-                close(redir.opened_file);
-            }
-
-            if(in_pipe != -1) {
-                dup2(in_pipe, STDIN_FILENO);
-                close(in_pipe);
-            }
-
-            if(out_pipe != -1) {
-                dup2(out_pipe, STDOUT_FILENO);
-                close(out_pipe);
-            }
-
-            char **cmd_b = new char *[cmd.params.size() + 2];
-            cmd_b[0] = strdup(cmd.app.c_str());
-            int pos = 1;
-            for (auto &param: cmd.params) {
-                cmd_b[pos++] = strdup(param.c_str());
-            }
-            cmd_b[pos] = nullptr;
-            execv(execable.c_str(), cmd_b);
+        if(cmd.foreground) {
+            tcsetpgrp(STDIN_FILENO, gid);
+            currentRunningGroup = gid;
         } else {
-            if (gid == -1) {
-                gid = pid;
-
-                Job tmp;
-                tmp.command = cmdStr;
-                tmp.group = gid;
-                tmp.processes.insert(pid);
-                tmp.running = true;
-                if(last_one) {
-                    tmp.last_pid = pid;
-                }
-                jobs.emplace_back(tmp);
-            } else {
-                bool found = false;
-                for(auto& job: jobs) {
-                    if(job.group == gid) {
-                        job.processes.insert(pid);
-                        if(last_one) {
-                            job.last_pid = pid;
-                        }
-                        found = true;
-                        break;
-                    }
-                }
-
-                if(!found) {
-                    cerr<<"INTERNAL ERROR: wrong gid provided!"<<endl;
-                    return;
-                }
-            }
-
-            setpgid(pid, gid);
-
-            if(cmd.foreground) {
-                tcsetpgrp(STDIN_FILENO, gid);
-                currentRunningGroup = gid;
-            } else {
-                currentRunningGroup = -1;
-            }
-
-            for(auto& redir: cmd.redirections) {
-                close(redir.opened_file);
-            }
-
-            if(in_pipe != -1) {
-                close(in_pipe);
-            }
-            if(out_pipe != -1) {
-                close(out_pipe);
-            }
+            currentRunningGroup = -1;
         }
-    } else {
-        cerr<<"Cannot execute: '"<<cmd.app<<"'"<<endl;
+
+        for(auto& redir: cmd.redirections) {
+            close(redir.opened_file);
+        }
+
+        if(in_pipe != -1) {
+            close(in_pipe);
+        }
+        if(out_pipe != -1) {
+            close(out_pipe);
+        }
     }
 }
 
@@ -411,13 +406,21 @@ void Executor::executeInternal(Command& cmd) {
     }
 }
 
+bool Executor::insertExecPath(Command& cmd) {
+    return (!cmd.app.empty() && getExecPath(cmd.app, cmd.path));
+}
+
 // execute single command
 int Executor::execute(Command& cmd, string& cmdStr) {
     if(isCmdInternal(cmd.app)) {
         executeInternal(cmd);
     } else {
         int gid = -1;
-        executeExternal(cmd, cmdStr, gid);
+        if(insertExecPath(cmd)) {
+            executeExternal(cmd, cmdStr, gid);
+        } else {
+            cerr<<"Cannot execute: '"<<cmd.app<<"'"<<endl;
+        }
     }
 }
 
@@ -437,6 +440,10 @@ int Executor::execute(vector<Command> cmds, string& cmd_str) {
             } else {
                 is_group_in_background = true;
             }
+        }
+        if(!insertExecPath(cmd)) {
+            cerr<<"Cannot execute: '"<<cmd.app<<"'"<<endl;
+            return 0;
         }
     }
     int prevInPipe = -1;

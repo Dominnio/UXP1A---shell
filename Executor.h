@@ -13,8 +13,6 @@
 #include <unordered_set>
 #include <wait.h>
 #include <climits>
-#include <lcms.h>
-#include <condition_variable>
 #include <termios.h>
 
 #define REDIR_IN true
@@ -33,6 +31,7 @@ struct Redirection {
 
 struct Command {
     string app;
+    string path = "";
     vector<string> params;
     vector<Redirection> redirections;
     bool foreground;
@@ -58,6 +57,7 @@ private:
     void executeInternal(Command& cmd);
     void executeExternal(Command& cmd, string&, int& gid, int in_pipe = -1, int out_pipe = -1, bool last_one = true);
     void getControl();
+    bool insertExecPath(Command& cmd);
 public:
     Executor() {
         tcgetattr (STDIN_FILENO, &shell_tmodes);
