@@ -47,7 +47,7 @@ void Executor::handle_child_death(int pid, int status) {
 #ifndef DEBUG_MODE
             if(currentRunningGroup == -1) {
 #endif
-                cout << endl << "process " << pid << " from group " << job.group << " finished with code "
+                cout << endl << "process " << pid << " from job '" << job.command << "' has finished with code "
                      << WEXITSTATUS(status) << " (status: " << status << ")" << endl;
 #ifndef DEBUG_MODE
             }
@@ -62,6 +62,9 @@ void Executor::handle_child_death(int pid, int status) {
                 }
             }
             if(job.processes.empty()) {
+                if(currentRunningGroup == -1) {
+                    cout << "Job '" << job.command << "' has finished with code " << WEXITSTATUS(job.return_code) << endl;
+                }
 #ifdef DEBUG_MODE
                 cout<<"all processes from group has finished"<<endl;
 #endif
@@ -113,6 +116,7 @@ void Executor::stop() {
         for(auto& job: jobs){
             if(job.group == currentRunningGroup) {
                 job.running = false;
+                cout<<"Stopped '"<<job.command<<"'"<<endl;
             }
         }
         currentRunningGroup = -1;
